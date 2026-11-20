@@ -16,12 +16,12 @@ class EmojieCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        border: Border.all(color: AppColors.primary, width: 1),
+        color: AppColors.card,
         borderRadius: BorderRadius.circular(AppRadius.medium),
       ),
       child: Text(
         emoji,
-        style: const TextStyle(fontSize: AppTextSizes.heading),
+        style: const TextStyle(fontSize: AppTextSizes.title),
       ),
     );
   }

@@ -11,7 +11,6 @@ class EmojieListChoice extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      spacing: 8,
       children: [
         Text(
           "AVATAR",
@@ -22,12 +21,18 @@ class EmojieListChoice extends StatelessWidget {
         ),
         Expanded(
           child: SingleChildScrollView(
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: avatars.map((emoji) {
-                return EmojieCard(emoji: emoji);
-              }).toList(),
+            child: SizedBox(
+              width: double.infinity,
+              child: Padding(
+                padding: EdgeInsets.only(top: 8, bottom: 15),
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  runSpacing: 8,
+                  children: avatars.map((emoji) {
+                    return EmojieCard(emoji: emoji);
+                  }).toList(),
+                ),
+              ),
             ),
           ),
         ),

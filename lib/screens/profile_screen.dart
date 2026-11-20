@@ -46,7 +46,7 @@ class ProfileScreen extends StatelessWidget {
                           fontSize: AppTextSizes.title,
                           fontWeight: FontWeight.bold,
                         ),
-                      )
+                      ),
                     ],
                   ),
                   Padding(
@@ -57,11 +57,30 @@ class ProfileScreen extends StatelessWidget {
                         color: AppColors.secondaryText,
                         fontSize: AppTextSizes.text,
                       ),
-                    )
+                    ),
                   ),
                   TextInput(),
                   SizedBox(height: 12),
-                  Expanded(child: EmojieListChoice(),),
+                  Expanded(child: EmojieListChoice()),
+                  Padding(
+                    padding: EdgeInsets.only(top: 15, bottom: 5),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 45,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          // Action du bouton
+                        },
+                        child: Text(
+                          'Continuer',
+                          style: TextStyle(
+                            fontSize: AppTextSizes.body,
+                            color: AppColors.background,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
