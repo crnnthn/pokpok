@@ -1,4 +1,5 @@
 import 'playing_card.dart';
+import 'hand_value.dart';
 
 // Joueur
 class Player {
@@ -63,6 +64,17 @@ class Player {
 
   // Peut ganger
   bool get inHand => !eliminated && !folded;
+
+  // Meilleure main atteinte
+  HandValue ? bestHand;
+
+  // Retenir si elle est meilleure que celle connue
+  void updateBestHand(HandValue value) {
+    final current = bestHand;
+    if (current == null || value.compareTo(current) > 0) {
+      bestHand = value;
+    }
+  }
 
   // Modifier un tapis
   void setStack(int value) {
