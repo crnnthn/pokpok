@@ -10,6 +10,8 @@ import '../models/game_phase.dart';
 import '../models/playing_card.dart';
 import '../models/player.dart';
 import '../models/player_action.dart';
+import '../models/hand_evaluator.dart';
+import '../models/showdown_reveal.dart';
 
 class GameController extends ChangeNotifier {
   GameController({
@@ -32,6 +34,19 @@ class GameController extends ChangeNotifier {
 
   // JOueur qui doivent encore parler
   final Set<int> _pending = {};
+
+  // Joueurs qui montrent leur main au showdown
+  final List<Player> _showdownQueue = [];
+
+  // Mains déjà révélées
+  final List<ShowdownReveal> _reveals = [];
+
+  // Gagnant(s) de la main / jetons gagnés
+  List<Player> _winners = [];
+  final Map<int, int> _winnings = {};
+
+  // Vrai quand la main est terminé
+  bool handFinished = false;
 
   // Cartes déjà révélées
   final List<PlayingCard> _board = [];
@@ -87,6 +102,15 @@ class GameController extends ChangeNotifier {
     _board.clear();
     pot = 0;
     phase = GamePhase.preflop;
+
+    // Efface les résultats de la main précédente
+    _showdownQueue.clear();
+
+    _reveals.clear();
+    _winners = [];
+
+    _winnings.clear();
+    handFinished = false;
 
     // Déplace le dealer
     dealerIndex = _nextActiveAfter(dealerIndex);
@@ -244,11 +268,9 @@ class GameController extends ChangeNotifier {
 
   // Passer la main au prochain joueur / termine le tour
   void _advanceTurn() {
-    // Tous les joueurs couchés
+    // Tous les autres se sont couché
     if (_players.where((p) => p.inHand).length <= 1) {
-      _pending.clear();
-      phase = GamePhase.showdown;
-      currentPlayerIndex = -1;
+      _enterShowdown();
       return;
     }
 
@@ -293,7 +315,7 @@ class GameController extends ChangeNotifier {
     }
 
     if (phase == GamePhase.showdown) {
-      currentPlayerIndex = -1;
+      _enterShowdown();
       return;
     }
 
@@ -315,4 +337,114 @@ class GameController extends ChangeNotifier {
     }
     return -1;
   }
+
+  // ---- Fin de main ----
+
+  // Mains révélées
+  List<ShowdownReveal> get reveals => List.unmodifiable(_reveals);
+
+  // Gagnant(s) de la main
+  List<Player> get winners => List.unmodifiable(_winners);
+
+  // Jetons gagnés par chaque gagnant
+  Map<int, int> get winnings => Map.unmodifiable(_winnings);
+
+  //Ouvre la phase de fin de main
+  void _enterShowdown() {
+    phase = GamePhase.showdown;
+
+    currentPlayerIndex = -1;
+
+    _pending.clear();
+    for (final p in _players) {
+      p.bet = 0;
+    }
+
+    final contenders = _players.where((p) => p.inHand).toList();
+    if (contenders.length == 1) {
+      // Joueur seul : gagne sans avoir à montrer sa main
+      _awardPot(contenders);
+      return;
+    }
+
+    // Ordre de révélation
+    final start = _nextActiveAfter(dealerIndex);
+    _showdownQueue.clear();
+    for (var i = 0; i < _players.length; i++) {
+      final p = _players[(start + i) % _players.length];
+      if (p.inHand) _showdownQueue.add(p);
+    }
+  }
+
+  // Révèle la main du joueur suivant
+  void revealNextHand(){
+    if (phase != GamePhase.showdown || handFinished || _showdownQueue.isEmpty) {
+      throw StateError('Aucune main à révéler');
+    }
+
+    final player = _showdownQueue[_reveals.length];
+    final value = HandEvaluator.evaluate([...player.holeCards, ..._board]);
+
+    // Gagnante si égale ou bat celles déjà révélées
+    final isLeading = _reveals.every((r) => value.compareTo(r.value!) >= 0);
+
+    player.updateBestHand(value);
+    _reveals.add(
+      ShowdownReveal(player:player, value: value, isLeading: isLeading),
+    );
+
+    // Dernière révélation
+    if (_reveals.length == _showdownQueue.length) {
+      final best = _reveals.map((r) => r.value!).reduce((a,b) => a.compareTo(b) >= 0 ? a :b);
+      _awardPot([
+        for (final r in _reveals)
+          if (r.value!.compareTo(best) == 0) r.player,
+      ]);
+    }
+    notifyListeners();
+  }
+
+  // Joueur resté seul choisit de montrer sa main
+  void revealWinnerHand(){
+    if (!handFinished || _showdownQueue.isNotEmpty || _reveals.isNotEmpty) {
+      throw StateError('Seul un joueur resté seul peut montrer sa main');
+    }
+    final winner = _winners.first;
+    final cards = [...winner.holeCards, ..._board];
+
+    // Avant le flop
+    final value = cards.length >= 5 ? HandEvaluator.evaluate(cards) : null;
+    if (value != null) winner.updateBestHand(value);
+
+    _reveals.add(ShowdownReveal(player: winner, value: value, isLeading: true));
+    notifyListeners();
+  }
+
+  // Distribue le pot entre les gagnants
+  void _awardPot(List<Player> winners) {
+    final share = pot ~/ winners.length;
+    final remainder = pot % winners.length;
+
+    for (var i = 0; i < winners.length; i++) {
+      final amount = share + (i == 0 ? remainder : 0);
+
+      winners[i].setStack(winners[i].stack + amount);
+      winners[i].handsWon++;
+
+      _winnings[winners[i].id] = amount;
+    }
+
+    pot = 0;
+    _winners = winners;
+    handFinished = true;
+
+    // Un joueur sans jeton est éliminé
+    for (final p in _players) {
+      if (!p.eliminated && p.stack == 0) {
+        p.eliminated = true;
+        p.lastAction = 'Éliminé';
+      }
+    }
+  }
+
 }
