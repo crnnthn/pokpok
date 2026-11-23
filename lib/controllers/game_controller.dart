@@ -75,6 +75,9 @@ class GameController extends ChangeNotifier {
   // Montant minimal d'une relance
   int minRaise = 0;
 
+  // Nombre de relance dans le tour
+  int raisesInRound = 0;
+
   // Numéro de la la main
   int handNumber = 0;
 
@@ -255,6 +258,7 @@ class GameController extends ChangeNotifier {
     // La relance minimale suivante est au moins égale à cette augmentation
     minRaise = max(minRaise, p.bet - currentBet);
     currentBet = p.bet;
+    raisesInRound++;
     p.lastAction = p.stack == 0 ? 'Tapis ${p.bet}' : '$label ${p.bet}';
 
     // Tous les autres joueurs capables d'agir doivent reparler en cas de relance
@@ -283,6 +287,7 @@ class GameController extends ChangeNotifier {
 
   // Ouvre un tour de mise
   void _beginBettingRound(int fromSeat) {
+    raisesInRound = 0;
     _pending
       ..clear()
       ..addAll([
