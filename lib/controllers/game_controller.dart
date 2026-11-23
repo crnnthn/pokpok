@@ -2,32 +2,36 @@
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../models/deck.dart';
 import '../models/game_config.dart';
 import '../models/game_phase.dart';
 import '../models/playing_card.dart';
 import '../models/player.dart';
+import '../models/player_action.dart';
 
-
-class GameController extends ChangeNotifier{
+class GameController extends ChangeNotifier {
   GameController({
     required this.config,
     required List<Player> players,
     int? initialDealer,
-    Deck Function() ? deckBuilder,
+    Deck Function()? deckBuilder,
   }) : _players = players,
-      // Par défaut un paquet mélangé
-      _deckBuilder = deckBuilder ?? Deck.new,
-      // Dealer de départ tié au hasard
-      dealerIndex = initialDealer ?? Random().nextInt(players.length);
-  
+       // Par défaut un paquet mélangé
+       _deckBuilder = deckBuilder ?? Deck.new,
+       // Dealer de départ tié au hasard
+       dealerIndex = initialDealer ?? Random().nextInt(players.length);
+
   // Paramètres de la partie
   final GameConfig config;
 
   final List<Player> _players;
   final Deck Function() _deckBuilder;
   late Deck _deck;
+
+  // JOueur qui doivent encore parler
+  final Set<int> _pending = {};
 
   // Cartes déjà révélées
   final List<PlayingCard> _board = [];
@@ -107,7 +111,9 @@ class GameController extends ChangeNotifier{
 
     currentBet = config.bigBlind;
     minRaise = config.bigBlind;
-    currentPlayerIndex = firstToAct;
+
+    // Ouvre le premier tour de mise
+    _beginBettingRound(firstToAct);
 
     notifyListeners();
   }
@@ -120,9 +126,9 @@ class GameController extends ChangeNotifier{
     do {
       order.add(seat);
       seat = _nextActiveAfter(seat);
-    } while(seat != smallBlindIndex);
+    } while (seat != smallBlindIndex);
 
-    for (var round = 0; round < 2; round++){
+    for (var round = 0; round < 2; round++) {
       for (final i in order) {
         _players[i].holeCards.add(_deck.draw());
       }
@@ -145,11 +151,168 @@ class GameController extends ChangeNotifier{
   }
 
   // Siège du joueur suivant
-  int _nextActiveAfter(int from){
+  int _nextActiveAfter(int from) {
     var i = from;
     do {
       i = (i + 1) % _players.length;
     } while (_players[i].eliminated);
     return i;
+  }
+
+  // ---- Tour de mise ----
+
+  // Le joueur dont c'st le tour
+  Player? get currentPlayer =>
+      currentPlayerIndex >= 0 ? _players[currentPlayerIndex] : null;
+
+  // Jetons que [player] doit payer pour suivre
+  int toCall(Player player) =>
+      max(0, min(currentBet - player.bet, player.stack));
+
+  // Plus petite mise pour une relance, plafonné au tapis
+  int get minRaiseTo {
+    final p = currentPlayer!;
+    return min(p.bet + p.stack, currentBet + minRaise);
+  }
+
+  // Applique l'action du joueur courant
+  void act(PlayerAction action) {
+    final p = currentPlayer;
+    if (p == null) {
+      throw StateError('Aucun joueur ne peut agir actuellement');
+    }
+
+    switch (action.type) {
+      case ActionType.fold:
+        p.folded = true;
+        p.lastAction = "Couché";
+      case ActionType.check:
+        if (toCall(p) > 0) {
+          throw ArgumentError(
+            'Impossible de checker : il faut suivre ou se coucher',
+          );
+        }
+        p.lastAction = "Check";
+      case ActionType.call:
+        final paid = _pay(p, toCall(p));
+        p.lastAction = paid == 0
+            ? 'Check'
+            : (p.stack == 0 ? 'Tapis $paid' : 'Suit $paid');
+      case ActionType.raise:
+        _raise(p, action.amount);
+    }
+
+    // Ce joueur a parlé
+    _pending.remove(currentPlayerIndex);
+    _advanceTurn();
+    notifyListeners();
+  }
+
+  // Applique une relance
+  void _raise(Player p, int to) {
+    final maxTo = p.bet + p.stack;
+    if (to <= currentBet) {
+      throw ArgumentError(
+        'Une relance doit dépasser la mise actuelle ($currentBet)',
+      );
+    }
+    if (to > maxTo) {
+      throw ArgumentError('Mise supérieure au tapis ($maxTo)');
+    }
+    // Sous la relance minimale, seul le tapis complet est accepté
+    if (to < currentBet + minRaise && to != maxTo) {
+      throw ArgumentError('Relance minimale : ${currentBet + minRaise}');
+    }
+
+    // Après le flop, la première mise s'appelle « Mise », ensuite « Relance »
+    final label = currentBet == 0 ? 'Mise' : 'Relance';
+    _pay(p, to - p.bet);
+
+    // La relance minimale suivante est au moins égale à cette augmentation
+    minRaise = max(minRaise, p.bet - currentBet);
+    currentBet = p.bet;
+    p.lastAction = p.stack == 0 ? 'Tapis ${p.bet}' : '$label ${p.bet}';
+
+    // Tous les autres joueurs capables d'agir doivent reparler en cas de relance
+    _pending
+      ..clear()
+      ..addAll([
+        for (var i = 0; i < _players.length; i++)
+          if (i != currentPlayerIndex && _players[i].canAct) i,
+      ]);
+  }
+
+  // Passer la main au prochain joueur / termine le tour
+  void _advanceTurn() {
+    // Tous les joueurs couchés
+    if (_players.where((p) => p.inHand).length <= 1) {
+      _pending.clear();
+      phase = GamePhase.showdown;
+      currentPlayerIndex = -1;
+      return;
+    }
+
+    if (_pending.isEmpty) {
+      _endBettingRound();
+    } else {
+      currentPlayerIndex = _nextPendingSeat(currentPlayerIndex + 1);
+    }
+  }
+
+  // Ouvre un tour de mise
+  void _beginBettingRound(int fromSeat) {
+    _pending
+      ..clear()
+      ..addAll([
+        for (var i = 0; i < _players.length; i++)
+          if (_players[i].canAct) i,
+      ]);
+    currentPlayerIndex = _nextPendingSeat(fromSeat);
+  }
+
+  // Terminer le tour
+  void _endBettingRound() {
+    for (final p in _players) {
+      p.bet = 0;
+      // Garder « Couché » et « Tapis » affichés
+      if (p.inHand && p.stack > 0) p.lastAction = '';
+    }
+    currentBet = 0;
+    minRaise = config.bigBlind;
+
+    phase = switch (phase) {
+      GamePhase.preflop => GamePhase.flop,
+      GamePhase.flop => GamePhase.turn,
+      GamePhase.turn => GamePhase.river,
+      GamePhase.river || GamePhase.showdown => GamePhase.showdown,
+    };
+
+    // Révèle les cartes manquantes
+    while (_board.length < phase.communityCards) {
+      _board.add(_deck.draw());
+    }
+
+    if (phase == GamePhase.showdown) {
+      currentPlayerIndex = -1;
+      return;
+    }
+
+    // Si aucun joueur ne peut miser
+    if (_players.where((p) => p.canAct).length <= 1) {
+      _endBettingRound();
+      return;
+    }
+
+    // Après flop, le premier à parler est celui à gauche du dealer
+    _beginBettingRound(_nextActiveAfter(dealerIndex));
+  }
+
+  // Prochain siège en attente
+  int _nextPendingSeat(int from) {
+    for (var i = 0; i < _players.length; i++) {
+      final seat = (from + i) % _players.length;
+      if (_pending.contains(seat)) return seat;
+    }
+    return -1;
   }
 }
