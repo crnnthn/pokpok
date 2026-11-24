@@ -78,6 +78,9 @@ class GameController extends ChangeNotifier {
   // Nombre de relance dans le tour
   int raisesInRound = 0;
 
+  // Compteur d'actions
+  int actionCount = 0;
+
   // Numéro de la la main
   int handNumber = 0;
 
@@ -229,6 +232,10 @@ class GameController extends ChangeNotifier {
         _raise(p, action.amount);
     }
 
+    // Joueur a joué dans les temps
+    p.consecutiveTimeouts = 0;
+    actionCount++;
+
     // Ce joueur a parlé
     _pending.remove(currentPlayerIndex);
     _advanceTurn();
@@ -294,6 +301,13 @@ class GameController extends ChangeNotifier {
         for (var i = 0; i < _players.length; i++)
           if (_players[i].canAct) i,
       ]);
+
+    // Personne ne peut miser
+    if (_pending.isEmpty) {
+      _endBettingRound();
+      return;
+    }
+
     currentPlayerIndex = _nextPendingSeat(fromSeat);
   }
 
@@ -452,4 +466,41 @@ class GameController extends ChangeNotifier {
     }
   }
 
+    // ---- Fin de partie et inactivité ----
+
+  // Exclusion pour inactivité
+  static const int maxConsecutiveTimeouts = 2;
+  static const int maxTotalTimeouts = 3;
+
+  // Vrai quand il ne reste plus qu'un joueur
+  bool get isGameOver => activePlayerCount <= 1;
+
+  // Le gagnant de la partie
+  Player?get gameWinner {
+    if (activePlayerCount != 1) return null;
+    return _players.firstWhere((p) => !p.eliminated);
+  }
+
+  // Le joueur n'a pas joué à temps
+  // Se couche automatique
+  // Exclu au bout de 2 timeouts de suite, ou de 3 au total.
+  void timeOutCurrentPlayer(){
+    final p = currentPlayer;
+    if (p == null) {
+      throw StateError('Aucun joueur ne peut agir actuellement');
+    }
+
+    final consecutive = p.consecutiveTimeouts + 1;
+    final total = p.totalTimeouts + 1;
+
+    act(const PlayerAction.fold());
+    p.consecutiveTimeouts = consecutive;
+    p.totalTimeouts = total;
+
+    if (consecutive >= maxConsecutiveTimeouts || total >= maxTotalTimeouts) {
+      p.eliminated =true;
+      p.lastAction = 'Exclu';
+    }
+    notifyListeners();
+  }
 }
